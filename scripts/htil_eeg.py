@@ -29,8 +29,8 @@ class HTIL_EEG:
         params.serial_port = serial_number
         self.board = BoardShim(board, params)
         self.board.prepare_session()
-        time.sleep(1)
-        self.board.start_stream()
+        # time.sleep(1)
+        # self.board.start_stream()
 
 
     def get_recent_ganglion_data(self):
