@@ -37,6 +37,8 @@
 
 ## Other Helpful commands
 
-`Get-Command python | Select-Object Source` (Find out where program is installed)
+### Find out where program is installed
+`Get-Command python | Select-Object Source` 
 
-`pyinstaller .\ganglion_tester.py --collect-all brainflow --onedir --windowed` (Create executable that works with brainflow)
+### Create executable that works with brainflow
+`pyinstaller .\ganglion_tester.py --collect-all brainflow --onedir --windowed` 
