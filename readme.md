@@ -24,6 +24,12 @@
 ### Install Libraries
 `pip install -r requirements.txt`
 
+or 
+
+`python -m pip install -r requirements.txt`
+
+if (venv) python has issues finding libraries
+
 
 ### Navigate to `.\scripts` direction
 
