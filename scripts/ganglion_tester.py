@@ -1,10 +1,9 @@
 from random import randint
-from htil_eeg import HTIL_EEG 
-from brainflow.board_shim import BoardIds, BoardShim
 import pyqtgraph as pg
 from PyQt5 import QtCore, QtWidgets
 import numpy as np
 import collections
+from ganglion import Ganglion
 
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
@@ -78,7 +77,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def connect_ganglion(self):
         try:
             # Attempt to connect to the Ganglion board
-            self.h_eeg = HTIL_EEG(BoardIds.GANGLION_BOARD.value, serial_number=self.text_input.text())
+            self.sensor = Ganglion(serial_number=self.text_input.text())
             self.connect_button.setEnabled(False)  # Disable connect button on success
         except Exception as e:
             # Show error message if connection fails
@@ -88,18 +87,18 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def stop_ganglion(self):
         # Stop the stream
-        self.h_eeg.stop_stream()
+        self.sensor.stop_stream()
         # Stop the timer
         self.timer.stop()
 
     def start_ganglion(self):
          # Setup Ganglion 
-        self.h_eeg.start_stream()   
+        self.sensor.start_stream()   
         # Add a timer to simulate new temperature measurements
         self.timer.start()
 
     def update_plot(self):
-        df = self.h_eeg.get_recent_ganglion_data()
+        df = self.sensor.get_recent_ganglion_data()
         data = np.array(df.iloc[:,1]) # Get Sensor data
         
         # Append each value individually to the deque

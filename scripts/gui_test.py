@@ -1,7 +1,7 @@
 from random import randint
-
 import pyqtgraph as pg
 from PyQt5 import QtCore, QtWidgets
+
 
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):

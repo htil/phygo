@@ -35,4 +35,8 @@
 `python record_test.py`
 
 
-## TODO 
+## Other Helpful commands
+
+`Get-Command python | Select-Object Source` (Find out where program is installed)
+
+`pyinstaller .\ganglion_tester.py --collect-all brainflow --onedir --windowed` (Create executable that works with brainflow)
