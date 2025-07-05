@@ -11,17 +11,20 @@ import time
 class EventWorker(QtCore.QObject):
     status_update = QtCore.pyqtSignal(str)
     
-    def __init__(self, window, event_labels):
+    def __init__(self, window, event_labels, sample_rate=200):
         super().__init__()
         self.window = window
         self.event_labels = event_labels
+        self.sample_rate = sample_rate
     
     def run(self):
         while self.window.event_index < len(self.window.events):
             current_event = self.window.events.iloc[self.window.event_index]
-            print('current_event:', current_event)
+            # print('current_event:', current_event)
             wait = int(current_event[0])
-            _wait = int(wait - self.window.epoch_lenght_array[-1])
+            wait_in_ms = (wait / self.sample_rate) * 1000
+            # print('wait_in_ms:', wait_in_ms)
+            _wait = int(wait_in_ms - self.window.epoch_lenght_array[-1])
            
             label = str(current_event[2])
             label = self.event_labels[current_event[2]]
@@ -30,7 +33,7 @@ class EventWorker(QtCore.QObject):
             self.status_update.emit(label)
             # print('wait:', _wait)
             # print('elapsed:', (time.time() - self.window.start_time) * 1000)
-            self.window.epoch_lenght_array.append(current_event[0])
+            self.window.epoch_lenght_array.append(wait_in_ms)
             self.window.event_index += 1
         else:
             self.status_update.emit("Done")
@@ -42,7 +45,7 @@ class EventWorker(QtCore.QObject):
             # return False
         
 class MainWindow(QtWidgets.QMainWindow):
-    def __init__(self, event_labels):
+    def __init__(self):
         super().__init__()
 
         self.configure_gui()
@@ -51,9 +54,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.update_freq = 100
         self.epoch_length = 3000
         self.sample_rate = 200
-        self.events = ['Relax', 'Squeeze', 'Lift']
+        # self.events = ['Relax', 'Squeeze', 'Lift']
         self.is_paused = False
-        self.event_labels = event_labels
 
         # Set size of data snapshot. How long to keep old data
         self.data_length_seconds = 10
@@ -72,15 +74,20 @@ class MainWindow(QtWidgets.QMainWindow):
         # self.timer2.setInterval(self.epoch_length)
         # self.timer2.timeout.connect(self.update_status)
 
-        self.events = None
+        # self.events = None
+
+
+    def read_events(self):
         self.event_index = 0
         event_file_name = self.event_file_name.text()
+        self.event_labels = pd.read_csv(f'events/{event_file_name}_event_labels.txt', header=None)
+        self.event_labels = self.event_labels.iloc[0].tolist()
+        print(self.event_labels)
+
         self.events = pd.read_csv(f'events/{event_file_name}.txt', header=None)
         self.epoch_lenght_array = [0]
         self.saved_df = pd.DataFrame()
         self.thread_running = False
-
-    def read_events(self):
 
         # If thread already running, stop it and reset variables
         if(self.thread_running == True):
@@ -103,22 +110,6 @@ class MainWindow(QtWidgets.QMainWindow):
         # Start thread
         self.worker_thread.start()
         self.thread_running = True
-
-        # else:
-        #     # Create new worker thread
-        #     self.worker_thread = QtCore.QThread()
-        #     # Create new worker object 
-        #     self.worker = EventWorker(self, self.event_labels)
-        #     # Move worker to thread
-        #     self.worker.moveToThread(self.worker_thread)
-        #     # Connect signals
-        #     self.worker_thread.started.connect(self.worker.run)
-        #     self.worker.status_update.connect(self.status_label.setText)
-        #     # Start thread
-        #     self.worker_thread.start()
-        #     self.thread_running = True
-
-
 
     def configure_gui(self):
         # Set window position to center of screen
@@ -279,6 +270,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.line.setData(array)
 
 app = QtWidgets.QApplication([])
-main = MainWindow(['Relax', 'Squeeze', 'Lift'])
+main = MainWindow()
 main.show()
 app.exec()
