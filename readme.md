@@ -42,3 +42,7 @@
 
 ### Create executable that works with brainflow
 `pyinstaller .\ganglion_tester.py --collect-all brainflow --onedir --windowed` 
+
+### Install Git on windows
+
+`winget install --id Git.Git -e --source winget`
