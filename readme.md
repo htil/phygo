@@ -35,6 +35,8 @@
 `python record_test.py`
 
 
+
+
 ## Other Helpful commands
 
 ### Find out where program is installed
@@ -46,3 +48,11 @@
 ### Install Git on windows
 
 `winget install --id Git.Git -e --source winget`
+
+
+### Addressing Unauthorized error
+
+![Alt text](./images/policy_error.png)
+
+`Set-ExecutionPolicy Unrestricted -Scope Process`
+
