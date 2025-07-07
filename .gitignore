@@ -290,13 +290,13 @@ docs/_build/
 *.mov
 
 # Image files (if not needed in repo)
-*.png
-*.jpg
-*.jpeg
-*.gif
-*.bmp
-*.tiff
-*.svg
+#*.png
+#*.jpg
+#*.jpeg
+#*.gif
+#*.bmp
+#*.tiff
+#*.svg
 
 # Archive files
 *.zip
