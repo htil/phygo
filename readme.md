@@ -9,7 +9,6 @@
 
 `> cd .\phygo\`
 
-
 ### Create Virual environment
 `python -m venv venv`
 
@@ -25,6 +24,9 @@
 
 `python -m pip install -r requirements.txt`
 
+### Update Requirements file
+
+`python -m pip freeze > requirements.txt`
 
 ### Navigate to `.\scripts` direction
 
@@ -33,9 +35,6 @@
 ### Run Script
 
 `python record_test.py`
-
-
-
 
 ## Other Helpful commands
 
@@ -48,7 +47,6 @@
 ### Install Git on windows
 
 `winget install --id Git.Git -e --source winget`
-
 
 ### Addressing Unauthorized error
 

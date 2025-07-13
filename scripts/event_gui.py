@@ -7,6 +7,12 @@ from ganglion import Ganglion
 import random
 import pandas as pd
 import time
+from beeply.notes import *
+
+
+
+
+
 
 class EventWorker(QtCore.QObject):
     status_update = QtCore.pyqtSignal(str)
@@ -16,6 +22,10 @@ class EventWorker(QtCore.QObject):
         self.window = window
         self.event_labels = event_labels
         self.sample_rate = sample_rate
+        self.force_stop = False
+
+    def stop(self):
+        self.force_stop = True
     
     def run(self):
         while self.window.event_index < len(self.window.events):
@@ -31,14 +41,17 @@ class EventWorker(QtCore.QObject):
             # print('label:', label)
             QtCore.QThread.msleep(_wait) 
             self.status_update.emit(label)
+            self.window.play_sound()
             # print('wait:', _wait)
             # print('elapsed:', (time.time() - self.window.start_time) * 1000)
             self.window.epoch_lenght_array.append(wait_in_ms)
             self.window.event_index += 1
+            if self.force_stop:
+                break
         else:
             self.status_update.emit("Done")
             # self.window.event_index = 0
-            self.window.end_events()
+            self.window.end_events(force=False)
             # self.window.worker_thread.quit()
             # self.window.worker_thread.wait()
             # self.window.worker_thread.stop()
@@ -69,6 +82,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.timer.setInterval(self.update_freq)
         self.timer.timeout.connect(self.update_plot)
         self.save_data = False
+        self.beeps = beeps()
+        # Create worker thread
+        self.worker_thread = QtCore.QThread()
 
         # self.timer2 = QtCore.QTimer()
         # self.timer2.setInterval(self.epoch_length)
@@ -76,30 +92,25 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # self.events = None
 
+    def play_sound(self):
+        if self.save_toggle.isChecked():
+            self.beeps.hear('A_')
 
     def read_events(self):
         self.event_index = 0
         event_file_name = self.event_file_name.text()
         self.event_labels = pd.read_csv(f'events/{event_file_name}_event_labels.txt', header=None)
         self.event_labels = self.event_labels.iloc[0].tolist()
-        print(self.event_labels)
+        # print(self.event_labels)
 
         self.events = pd.read_csv(f'events/{event_file_name}.txt', header=None)
         self.epoch_lenght_array = [0]
         self.saved_df = pd.DataFrame()
-        self.thread_running = False
 
         # If thread already running, stop it and reset variables
-        if(self.thread_running == True):
-            self.event_index = 0
-            self.epoch_lenght_array = [0]
-            self.saved_df = pd.DataFrame()
-            self.worker_thread.quit()
-            self.worker_thread.wait()
-            # self.thread_running = False
-
-        # Create worker thread
-        self.worker_thread = QtCore.QThread()
+        if(self.worker_thread.isRunning()):
+            print("Worker thread is running")
+ 
         # Create worker object
         self.worker = EventWorker(self, self.event_labels)
         # Move worker to thread
@@ -168,6 +179,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self.event_file_name_label = QtWidgets.QLabel("Event File Name:")
         self.event_file_name.setText("study1")
 
+        # Create Stop Study Button
+        self.stop_events_button = QtWidgets.QPushButton("Stop Study") 
+        self.stop_events_button.clicked.connect(self.end_events)
+        
+
+        # Create toggle for saving data
+        self.save_toggle = QtWidgets.QCheckBox("Play Sound")
+        self.save_toggle.setChecked(False)  # Default to saving data
+
         # self.text_input.setPlaceholderText("COM19")
 
         # Create layout to hold plot and button
@@ -184,30 +204,42 @@ class MainWindow(QtWidgets.QMainWindow):
         
         layout.addWidget(self.event_file_name_label)
         layout.addWidget(self.event_file_name)
+
+        layout.addWidget(self.save_toggle)
+
         
         # Buttons
         layout.addWidget(self.connect_button)
         # layout.addWidget(self.button)
         # layout.addWidget(self.button2)
         layout.addWidget(self.start_events_button)
-
+        layout.addWidget(self.stop_events_button)
 
         # Create a widget to hold the layout
         widget = QtWidgets.QWidget()
         widget.setLayout(layout)
         self.setCentralWidget(widget)
 
-                # Style Plot
+        # Style Plot
         self.plot_graph.setBackground("w")
         pen = pg.mkPen(color=(255, 0, 0))
 
         # Get a line reference
         self.line = self.plot_graph.plot([], pen=pen)
 
-    def end_events(self):
+    def end_events(self, force=True):
         self.save_data = False
         file_name = self.save_file_name.text()
-        self.saved_df.to_csv(f'data/{file_name}.csv', index=False)
+        if force == False:
+            self.saved_df.to_csv(f'data/{file_name}.csv', index=False)
+        self.end_worker_thread()
+
+    def end_worker_thread(self):
+        if hasattr(self, 'worker_thread') and self.worker_thread.isRunning():
+            self.worker.stop()
+            self.worker_thread.quit()
+            self.worker_thread.wait()
+        
 
     def connect_ganglion(self):
         try:
