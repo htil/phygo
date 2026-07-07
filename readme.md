@@ -34,7 +34,11 @@
 
 ### Run Script
 
-`python record_test.py`
+`python .\scripts\phygo_app.py`
+
+### Analyze Data
+
+`analyze.ipynb`
 
 ## Other Helpful commands
 
