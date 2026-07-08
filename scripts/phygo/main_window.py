@@ -15,9 +15,14 @@ from PyQt5 import QtCore, QtWidgets
 from ganglion import Ganglion
 
 from phygo.event_generator import (
+    DEFAULT_REST_MS,
+    PRE_RECORD_PADDING_MS,
+    REST_LABEL,
     EventRow,
     generate_events,
     estimate_duration_minutes,
+    interleaved_presentation_time_samples,
+    labels_with_rest,
     parse_labels,
     save_event_files,
     validate_event_rows,
@@ -36,6 +41,8 @@ try:
 except ImportError:
     beeps = None
 
+BEEP_AFTER_LABEL_MS = 100
+
 
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self, scripts_dir: str | None = None):
@@ -44,6 +51,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.scripts_dir, self.events_dir, self.data_dir = resolve_storage_paths(default_dir)
 
         self.sample_rate = 200
+        self.latency_ms = 2000
+        self.rest_ms = DEFAULT_REST_MS
         self.update_freq = 100
         self.data_length_seconds = 10
         self.data_size = self.sample_rate * self.data_length_seconds
@@ -53,6 +62,7 @@ class MainWindow(QtWidgets.QMainWindow):
         ]
 
         self.event_rows: list[EventRow] = []
+        self.presented_event_rows: list[EventRow] = []
         self.event_labels: list[str] = []
         self.events_confirmed = False
         self.sensor = None
@@ -101,13 +111,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self.labels_input = QtWidgets.QLineEdit("Relax,Thumb,Index")
         self.events_per_label_input = QtWidgets.QLineEdit("20")
         self.sfreq_input = QtWidgets.QLineEdit(str(self.sample_rate))
-        self.epoch_length_input = QtWidgets.QLineEdit("2")
+        self.latency_input = QtWidgets.QLineEdit(str(self.latency_ms))
+        self.rest_input = QtWidgets.QLineEdit(str(self.rest_ms))
         self.session_name_input = QtWidgets.QLineEdit("study1")
 
         form.addRow("Event Labels (comma-separated):", self.labels_input)
         form.addRow("Events per Label:", self.events_per_label_input)
         form.addRow("Sampling Frequency (Hz):", self.sfreq_input)
-        form.addRow("Epoch Length (seconds):", self.epoch_length_input)
+        form.addRow("Latency (ms):", self.latency_input)
+        form.addRow("Rest (ms):", self.rest_input)
         form.addRow("Session Name:", self.session_name_input)
         layout.addLayout(form)
 
@@ -176,6 +188,7 @@ class MainWindow(QtWidgets.QMainWindow):
         layout.addWidget(self.recording_status_label)
 
         self.play_sound_checkbox = QtWidgets.QCheckBox("Play sound on each event")
+        self.play_sound_checkbox.setChecked(False)
         layout.addWidget(self.play_sound_checkbox)
 
         button_row = QtWidgets.QHBoxLayout()
@@ -223,17 +236,19 @@ class MainWindow(QtWidgets.QMainWindow):
         if events_error:
             return None, events_error
 
+        latency_ms, latency_error = validate_positive_int(
+            self.latency_input.text(), "Latency"
+        )
+        if latency_error:
+            return None, latency_error
+        rest_ms, rest_error = validate_positive_int(self.rest_input.text(), "Rest")
+        if rest_error:
+            return None, rest_error
         sfreq, sfreq_error = validate_positive_int(
             self.sfreq_input.text(), "Sampling frequency"
         )
         if sfreq_error:
             return None, sfreq_error
-
-        epoch_length, epoch_error = validate_positive_int(
-            self.epoch_length_input.text(), "Epoch length"
-        )
-        if epoch_error:
-            return None, epoch_error
 
         session_name = self.session_name_input.text().strip()
         if not session_name:
@@ -243,7 +258,8 @@ class MainWindow(QtWidgets.QMainWindow):
             "labels": labels,
             "events_per_label": events_per_label,
             "sfreq": sfreq,
-            "epoch_length": epoch_length,
+            "latency_ms": latency_ms,
+            "rest_ms": rest_ms,
             "session_name": session_name,
         }, ""
 
@@ -299,10 +315,15 @@ class MainWindow(QtWidgets.QMainWindow):
             )
             return
 
-        sfreq = int(self.sfreq_input.text() or self.sample_rate)
-        duration = estimate_duration_minutes(self.event_rows, sfreq)
+        duration = estimate_duration_minutes(
+            int(self.events_per_label_input.text()),
+            len(parse_labels(self.labels_input.text())),
+            self.latency_ms,
+            self.rest_ms,
+        )
         self.design_summary_label.setText(
-            f"{len(self.event_rows)} events defined. Estimated duration: {duration} minutes."
+            f"{len(self.event_rows)} events defined (including Rest). "
+            f"Estimated duration: {duration} minutes."
         )
 
     def _generate_events(self):
@@ -311,13 +332,16 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.warning(self, "Invalid Input", error)
             return
 
-        self.event_labels = params["labels"]
+        self.event_labels = labels_with_rest(params["labels"])
+        self.latency_ms = params["latency_ms"]
+        self.rest_ms = params["rest_ms"]
         self.sample_rate = params["sfreq"]
         self.event_rows = generate_events(
             events_per_label=params["events_per_label"],
+            latency_ms=params["latency_ms"],
+            rest_ms=params["rest_ms"],
+            stimulus_labels=params["labels"],
             sfreq=params["sfreq"],
-            epoch_length=params["epoch_length"],
-            labels=params["labels"],
         )
         self.events_confirmed = False
         self._populate_preview_table()
@@ -334,17 +358,19 @@ class MainWindow(QtWidgets.QMainWindow):
         self.events_confirmed = False
 
     def _confirm_events(self):
-        labels, label_error = self._read_labels_from_input()
+        stimulus_labels, label_error = self._read_labels_from_input()
         if label_error:
             QtWidgets.QMessageBox.warning(self, "Missing Labels", label_error)
             return
+
+        all_labels = labels_with_rest(stimulus_labels)
 
         rows, row_error = self._read_rows_from_table()
         if row_error:
             QtWidgets.QMessageBox.warning(self, "Invalid Events", row_error)
             return
 
-        valid, validation_error = validate_event_rows(rows, labels)
+        valid, validation_error = validate_event_rows(rows, all_labels)
         if not valid:
             QtWidgets.QMessageBox.warning(self, "Invalid Events", validation_error)
             return
@@ -355,9 +381,21 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.warning(self, "Invalid Save Location", dir_error)
             return
 
-        self.event_labels = labels
+        self.event_labels = all_labels
         self.event_rows = rows
         self.events_confirmed = True
+
+        latency_ms, latency_error = self._read_latency_ms()
+        rest_ms, rest_error = self._read_rest_ms()
+        sfreq, sfreq_error = self._read_sampling_frequency()
+        if not latency_error and not rest_error and not sfreq_error:
+            self.latency_ms = latency_ms
+            self.rest_ms = rest_ms
+            self.sample_rate = sfreq
+            self.event_rows = self._sync_event_sample_times(
+                rows, latency_ms, rest_ms, sfreq
+            )
+
         self._set_storage_paths(output_dir)
         self.output_dir_input.setText(self.scripts_dir)
         self._update_design_summary()
@@ -377,7 +415,7 @@ class MainWindow(QtWidgets.QMainWindow):
             (
                 f"{len(rows)} events are ready for recording.\n"
                 f"Session name: {self.session_name_input.text().strip()}\n"
-                f"Estimated duration: {estimate_duration_minutes(rows, self.sample_rate)} minutes"
+                f"Estimated duration: {estimate_duration_minutes(int(self.events_per_label_input.text()), len(stimulus_labels), self.latency_ms, self.rest_ms)} minutes"
             ),
         )
 
@@ -406,8 +444,39 @@ class MainWindow(QtWidgets.QMainWindow):
             self.connection_status_label.setText("Connection: Failed")
 
     def _play_sound(self):
+        if not self.save_data:
+            return
         if self.play_sound_checkbox.isChecked() and self.beeps is not None:
             self.beeps.hear("A_")
+
+    def _schedule_beep_after_label(self) -> None:
+        QtCore.QTimer.singleShot(BEEP_AFTER_LABEL_MS, self._play_sound)
+
+    def _read_latency_ms(self) -> tuple[int | None, str]:
+        latency_ms, error = validate_positive_int(self.latency_input.text(), "Latency")
+        return latency_ms, error
+
+    def _read_sampling_frequency(self) -> tuple[int | None, str]:
+        sfreq, error = validate_positive_int(self.sfreq_input.text(), "Sampling frequency")
+        return sfreq, error
+
+    def _read_rest_ms(self) -> tuple[int | None, str]:
+        rest_ms, error = validate_positive_int(self.rest_input.text(), "Rest")
+        return rest_ms, error
+
+    def _sync_event_sample_times(
+        self, rows: list[EventRow], latency_ms: int, rest_ms: int, sfreq: int
+    ) -> list[EventRow]:
+        return [
+            EventRow(
+                latency=interleaved_presentation_time_samples(
+                    index, latency_ms, rest_ms, sfreq
+                ),
+                placeholder=0,
+                label_index=row.label_index,
+            )
+            for index, row in enumerate(rows)
+        ]
 
     def _start_study(self):
         if not self.events_confirmed:
@@ -430,9 +499,30 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.information(self, "Study Running", "A study is already in progress.")
             return
 
+        latency_ms, latency_error = self._read_latency_ms()
+        if latency_error:
+            QtWidgets.QMessageBox.warning(self, "Invalid Latency", latency_error)
+            return
+        rest_ms, rest_error = self._read_rest_ms()
+        if rest_error:
+            QtWidgets.QMessageBox.warning(self, "Invalid Rest", rest_error)
+            return
+        sfreq, sfreq_error = self._read_sampling_frequency()
+        if sfreq_error:
+            QtWidgets.QMessageBox.warning(self, "Invalid Sampling Frequency", sfreq_error)
+            return
+        self.latency_ms = latency_ms
+        self.rest_ms = rest_ms
+        self.sample_rate = sfreq
+        self.event_rows = self._sync_event_sample_times(
+            self.event_rows, latency_ms, rest_ms, sfreq
+        )
+
         self.start_time = time.time()
         self.save_data = True
         self.saved_df = pd.DataFrame()
+        self.presented_event_rows = []
+        self.presentation_event_index = 0
         self.start_button.setEnabled(False)
         self.stop_button.setEnabled(True)
         self.recording_status_label.setText("Recording: In progress")
@@ -442,7 +532,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.worker = EventWorker(
             event_rows=self.event_rows,
             event_labels=self.event_labels,
-            sample_rate=self.sample_rate,
+            latency_ms=self.latency_ms,
+            rest_ms=self.rest_ms,
+            pre_record_padding_ms=PRE_RECORD_PADDING_MS,
         )
         self.worker.moveToThread(self.worker_thread)
         self.worker_thread.started.connect(self.worker.run)
@@ -452,8 +544,21 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_event_status(self, label: str):
         self.status_label.setText(label)
-        if label != "Done":
-            self._play_sound()
+        if label == "Done" or not self.save_data:
+            return
+
+        sample = round((time.time() - self.start_time) * self.sample_rate)
+        if self.presentation_event_index < len(self.event_rows):
+            label_index = self.event_rows[self.presentation_event_index].label_index
+        else:
+            label_index = self.event_labels.index(label)
+
+        self.presented_event_rows.append(
+            EventRow(latency=sample, placeholder=0, label_index=label_index)
+        )
+        self.presentation_event_index += 1
+        if label != REST_LABEL:
+            self._schedule_beep_after_label()
 
     def _end_worker_thread(self):
         if self.worker is not None:
@@ -478,9 +583,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
         saved_paths: list[str] = []
         try:
+            event_rows_to_save = (
+                self.presented_event_rows if self.presented_event_rows else self.event_rows
+            )
             event_file, labels_file = save_event_files(
                 base_name=session_name,
-                rows=self.event_rows,
+                rows=event_rows_to_save,
                 labels=self.event_labels,
                 events_dir=self.events_dir,
             )
