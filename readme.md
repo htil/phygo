@@ -34,7 +34,7 @@
 
 ### Run Script
 
-`python .\scripts\phygo_app.py`
+`python phygo_app.py`
 
 ### Analyze Data
 
